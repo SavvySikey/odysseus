@@ -144,6 +144,21 @@ class ChatHandler:
         if has_youtube:
             youtube_transcripts.insert(0, YOUTUBE_INSTRUCTION_PROMPT)
 
+        # >>> pinned library context >>>
+        # Inject snippets from library files pinned to this chat.
+        if allow_tool_preprocessing:
+            try:
+                from src.library_pins import build_pinned_library_context
+                pinned_ctx = build_pinned_library_context(
+                    str(getattr(sess, "id", "") or ""),
+                    enhanced_message,
+                )
+                if pinned_ctx:
+                    enhanced_message = f"{enhanced_message}\n\n{pinned_ctx}"
+            except Exception as e:
+                logger.warning(f"Pinned library context injection failed: {e}")
+        # <<< pinned library context <<<
+
         # Resolve uploads once with the session owner. Attachment IDs are
         # bearer-like references; never trust them without an owner check.
         files_by_id: Dict[str, Dict] = {}
@@ -296,6 +311,22 @@ class ChatHandler:
 
     async def handle_memory_command(self, session, message: str) -> Optional[str]:
         """Process inline memory commands. Returns response string or None."""
+        # >>> library pin commands >>>
+        try:
+            from src.library_pins import maybe_handle_library_pin_command
+            library_reply = maybe_handle_library_pin_command(str(getattr(session, "id", "") or ""), message)
+            if library_reply:
+                session.add_message(ChatMessage("user", message))
+                session.add_message(ChatMessage("assistant", library_reply))
+
+                from src.database import update_session_last_accessed
+                update_session_last_accessed(session.id)
+                self.session_manager.save_sessions()
+                return library_reply
+        except Exception as e:
+            logger.warning(f"Library pin command failed: {e}")
+        # <<< library pin commands <<<
+
         is_memory_cmd, memory_text = self.memory_manager.process_inline_memory_command(
             message
         )
