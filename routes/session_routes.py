@@ -203,6 +203,11 @@ def _pick_endpoint_for_sort(owner=None):
         return url, model, headers
     return None, None, None
 
+
+def _is_internal_group_participant_name(name: str | None) -> bool:
+    n = (name or "").strip()
+    return n.startswith("[GRP] ") and "," not in n
+
 def setup_session_routes(session_manager: SessionManager, config: dict, webhook_manager=None):
     """Setup session routes with the provided manager and config"""
 
@@ -414,6 +419,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         
         sid = str(uuid.uuid4())
         user = effective_user(request)
+        archive_on_create = _is_internal_group_participant_name(name)
         session = session_manager.create_session(
             session_id=sid,
             name=name or "",
@@ -422,6 +428,17 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             rag=str(rag).lower() == "true" if rag else False,
             owner=user,
         )
+        if archive_on_create:
+            session.archived = True
+            db = SessionLocal()
+            try:
+                db_session = db.query(DbSession).filter(DbSession.id == sid).first()
+                if db_session:
+                    db_session.archived = True
+                    db_session.updated_at = datetime.utcnow()
+                    db.commit()
+            finally:
+                db.close()
         # Set auth headers for custom API-key endpoints
         resolved_key = request_api_key
         resolved_base = endpoint_url
