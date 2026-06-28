@@ -102,3 +102,14 @@ compound.config.json
 *.error.log
 _scratch/
 /odysseus/
+
+# Local patch/test backups
+*.bak-*
+*.bak.*
+*.bak
+container-backups/
+
+# Local database safety backups
+data/*.db.bak-*
+data/*.sqlite.bak-*
+data/*.sqlite3.bak-*
