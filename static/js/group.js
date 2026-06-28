@@ -182,8 +182,8 @@ function _initGroupTab() {
         const existing = await fetch(API_BASE + '/api/presets/groups', { credentials: 'same-origin' }).then(r => r.json());
         const groups = existing.groups || [];
         // Don't duplicate if same participants
-        const sig = presetData.participants.map(p => p.modelId + ':' + (p.characterId || '')).sort().join(',');
-        const exists = groups.some(g => (g.participants || []).map(p => p.modelId + ':' + (p.characterId || '')).sort().join(',') === sig);
+        const sig = presetData.mode + '|' + presetData.participants.map(p => p.modelId + ':' + (p.characterId || '')).join(',');
+        const exists = groups.some(g => ((g.mode || 'round-robin') + '|' + (g.participants || []).map(p => p.modelId + ':' + (p.characterId || '')).join(',')) === sig);
         if (!exists) {
           groups.push(presetData);
           await fetch(API_BASE + '/api/presets/groups', {
@@ -257,7 +257,7 @@ function _initGroupTab() {
             }
             if (entry.model) _groupParticipants.push(entry);
           });
-          _mode = g.mode || 'parallel';
+          _mode = g.mode || 'round-robin';
           _render();
         });
         // Long-press / right-click to delete
