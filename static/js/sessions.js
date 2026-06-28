@@ -283,6 +283,19 @@ function buildFolderSubmenu(sessionId, currentFolder, dropdown) {
   return moveItem;
 }
 
+
+function _isEditableKeyTarget(target) {
+  const el = target && target.nodeType === 1 ? target : null;
+  if (!el) return false;
+
+  const tag = String(el.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+  if (el.isContentEditable) return true;
+  if (el.closest && el.closest('input, textarea, select, [contenteditable="true"], .session-rename-input')) return true;
+
+  return false;
+}
+
 /** Create a single session list-item element. */
 function createSessionItem(s) {
   const div = document.createElement('div');
@@ -362,10 +375,10 @@ function createSessionItem(s) {
   if (_isFork) chatTitle = chatTitle.replace(/^Fork:\s*/, '').replace(/^\u2ADD\s*/, '');
   if (_isGroup) chatTitle = chatTitle.replace(/^\[GRP\]\s*/, '');
   let label = chatTitle;
-  if (s.model) label += ' · ' + s.model.split('/').pop();
+  // Hide model name in the main sidebar chat label.
   if (s.archived) label += ' [archived]';
   span.textContent = label;
-  span.title = (s.model ? s.model.split('/').pop() + ' · ' : '') + chatTitle;
+  span.title = chatTitle;
   span.classList.add('text-ellipsis');
 
   // Double-click to rename (only when session is already selected)
@@ -396,6 +409,7 @@ function createSessionItem(s) {
       };
       input.addEventListener('blur', commit);
       input.addEventListener('keydown', (ev) => {
+        ev.stopPropagation();
         if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
         if (ev.key === 'Escape') { input.removeEventListener('blur', commit); _forceSidebarOpen(); renderSessionList(); _stopGuard(); }
       });
@@ -658,6 +672,7 @@ function createSessionItem(s) {
     };
     input.addEventListener('blur', commit);
     input.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
       if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
       if (ev.key === 'Escape') { input.removeEventListener('blur', commit); _forceSidebarOpen(); renderSessionList(); _stopGuard(); }
     });
@@ -1937,6 +1952,7 @@ export function setCurrentSessionId(id) {
 
 // Session list keyboard navigation: arrows to move, Delete to delete
 async function _onSessionListKeydown(e) {
+  if (_isEditableKeyTarget(e.target)) return;
   const item = e.target.closest('.list-item[data-session-id]');
   if (!item) return;
 
