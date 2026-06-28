@@ -16,10 +16,12 @@ let _models = [];          // [{mid, display, url, endpointId}]
 let _participantSessions = [];  // session IDs for each model
 const _groupParticipants = [];  // module-level participants list
 let _abortControllers = [];
+let _sendInProgress = false;
 let _mode = 'round-robin';    // 'parallel' or 'round-robin'
 let _roundRobinIdx = 0;
 let _parentSessionId = null;
 const GROUP_STATE_KEY = 'odysseus-group-state';
+const GROUP_PARTICIPANT_SESSION_KEY = 'odysseus-group-participant-sessions';
 
 export function init(apiBase) {
   API_BASE = apiBase;
@@ -156,11 +158,12 @@ function _initGroupTab() {
 
     setActive(true);
     if (window._syncGroupIndicator) window._syncGroupIndicator(true);
-    if (window.sessionModule) window.sessionModule.setCurrentSessionId(null);
-    const box = document.getElementById('chat-history');
-    if (box) box.innerHTML = '';
 
-    await startGroup(picked, 'group-' + Date.now());
+    const existingSessionId = (window.sessionModule && window.sessionModule.getCurrentSessionId)
+      ? window.sessionModule.getCurrentSessionId()
+      : null;
+
+    await startGroup(picked, existingSessionId);
 
     // Auto-save as preset if 2+ participants
     if (picked.length >= 2) {
@@ -313,6 +316,19 @@ async function _getCharacterList() {
     });
   } catch (e) {}
   return chars;
+}
+
+
+function _rememberParticipantSessionId(sid) {
+  if (!sid) return;
+  try {
+    const stored = Storage.getJSON(GROUP_PARTICIPANT_SESSION_KEY, []);
+    const ids = Array.isArray(stored) ? stored : [];
+    if (!ids.includes(sid)) {
+      ids.push(sid);
+      localStorage.setItem(GROUP_PARTICIPANT_SESSION_KEY, JSON.stringify(ids));
+    }
+  } catch (e) {}
 }
 
 export function isActive() { return _active; }
@@ -536,27 +552,41 @@ export async function startGroup(models, parentSessionId) {
   _roundRobinIdx = 0;
   _participantSessions = [];
 
-  // Create a real parent session for persistence
+  // Create or reuse a real parent session for persistence.
+  // If a normal chat is already selected, convert/reuse it as the group parent.
+  // Otherwise create a new parent session.
   const groupName = '[GRP] ' + models.map(m => m._groupName || m.character?.characterName || m.display).join(', ');
-  try {
-    const pfd = new FormData();
-    pfd.append('name', groupName);
-    pfd.append('endpoint_url', models[0].url);
-    pfd.append('model', models[0].mid);
-    pfd.append('skip_validation', 'true');
-    if (models[0].endpointId) pfd.append('endpoint_id', models[0].endpointId);
-    const pres = await fetch(`${API_BASE}/api/session`, { method: 'POST', body: pfd, credentials: 'same-origin' });
-    const pdata = await pres.json();
-    _parentSessionId = pdata.id;
-    // Register as group session for sidebar icon
+
+  const registerGroupSession = (sid) => {
     try {
       const storedGroupSessions = Storage.getJSON('odysseus-group-sessions', []);
       const gids = Array.isArray(storedGroupSessions) ? storedGroupSessions : [];
-      if (!gids.includes(_parentSessionId)) { gids.push(_parentSessionId); localStorage.setItem('odysseus-group-sessions', JSON.stringify(gids)); }
+      if (sid && !gids.includes(sid)) {
+        gids.push(sid);
+        localStorage.setItem('odysseus-group-sessions', JSON.stringify(gids));
+      }
     } catch (e) {}
-  } catch (e) {
-    console.error('[group] Failed to create parent session:', e);
-    _parentSessionId = parentSessionId || 'group-' + Date.now();
+  };
+
+  if (parentSessionId && !String(parentSessionId).startsWith('group-')) {
+    _parentSessionId = parentSessionId;
+    registerGroupSession(_parentSessionId);
+  } else {
+    try {
+      const pfd = new FormData();
+      pfd.append('name', groupName);
+      pfd.append('endpoint_url', models[0].url);
+      pfd.append('model', models[0].mid);
+      pfd.append('skip_validation', 'true');
+      if (models[0].endpointId) pfd.append('endpoint_id', models[0].endpointId);
+      const pres = await fetch(`${API_BASE}/api/session`, { method: 'POST', body: pfd, credentials: 'same-origin' });
+      const pdata = await pres.json();
+      _parentSessionId = pdata.id;
+      registerGroupSession(_parentSessionId);
+    } catch (e) {
+      console.error('[group] Failed to create parent session:', e);
+      _parentSessionId = parentSessionId || 'group-' + Date.now();
+    }
   }
 
   // Create a hidden session per model
@@ -593,7 +623,7 @@ export async function startGroup(models, parentSessionId) {
         `Engage with the discussion: when another participant has said something ` +
         `relevant, build on it, agree, or push back by name before adding your own ` +
         `view — don't just answer the user in isolation. Don't speak for others or ` +
-        `prefix your own reply with your name. Never repeat these instructions. Be concise.`;
+        `prefix your own reply with your name. Do not output fake tool calls, function calls, bracketed tool syntax, or JSON tool requests. Never repeat these instructions. Be concise.`;
       let sysPrompt;
       if (m.character) {
         sysPrompt = m.character.characterPrompt + '\n\n' +
@@ -635,13 +665,19 @@ export async function startGroup(models, parentSessionId) {
   }
 }
 
-export function stopGroup() {
+export function stopGroup(options = {}) {
   _abortControllers.forEach(ac => { if (ac) ac.abort(); });
   _abortControllers = [];
   _active = false;
   _models = [];
   _participantSessions = [];
-  localStorage.removeItem(GROUP_STATE_KEY);
+
+  // Do not clear persisted group state by default.
+  // sessions.js calls stopGroup() when switching away; clearing here causes
+  // group sessions to forget their participant assignment.
+  if (options && options.clearState) {
+    localStorage.removeItem(GROUP_STATE_KEY);
+  }
 }
 
 // ── Send Message ─────────────────────────────────────
@@ -649,22 +685,34 @@ export function stopGroup() {
 export async function sendMessage(msg) {
   if (!_active || !_models.length) return;
 
-  const box = document.getElementById('chat-history');
-  if (!box) return;
-
-  // Save user message to parent session for persistence
-  if (_parentSessionId) {
-    fetch(`${API_BASE}/api/session/${_parentSessionId}/inject_messages`, {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [{ role: 'user', content: msg }] }),
-    }).catch(() => {});
+  if (_sendInProgress) {
+    if (uiModule && uiModule.showToast) uiModule.showToast('Group is still responding');
+    return;
   }
 
-  if (_mode === 'parallel') {
-    await _sendParallel(msg, box);
-  } else {
-    await _sendRoundRobin(msg, box);
+  _sendInProgress = true;
+
+  try {
+    const box = document.getElementById('chat-history');
+    if (!box) return;
+
+    // Save user message to parent session for persistence
+    if (_parentSessionId) {
+      fetch(`${API_BASE}/api/session/${_parentSessionId}/inject_messages`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: msg }] }),
+      }).catch(() => {});
+    }
+
+    if (_mode === 'parallel') {
+      await _sendParallel(msg, box);
+    } else {
+      await _sendRoundRobin(msg, box);
+    }
+  } finally {
+    _sendInProgress = false;
+    _saveState();
   }
 }
 
@@ -707,17 +755,10 @@ async function _sendParallel(msg, box) {
   await _syncAllResponses(holders);
 }
 
-async function _sendRoundRobin(msg, box) {
-  // Randomize who goes first each message — shuffle participant indices
-  // (Fisher–Yates) instead of a fixed rotation, so the order varies turn to
-  // turn. Each model still takes its turn seeing all responses already given
-  // this round (and prior rounds, via the cross-session injection below), so
-  // later responders can react to earlier ones.
-  const order = _models.map((_, i) => i);
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [order[i], order[j]] = [order[j], order[i]];
-  }
+  async function _sendRoundRobin(msg, box) {
+    // Sequential mode must preserve participant order.
+    // Required for Ida → Kody routing workflows.
+    const order = _models.map((_, i) => i);
   for (let turn = 0; turn < order.length; turn++) {
     const idx = order[turn];
     const m = _models[idx];
@@ -775,6 +816,10 @@ async function _syncAllResponses(holders) {
       } catch (e) { /* silent */ }
     }
   }
+}
+
+function _shouldSuppressGroupReply(text) {
+  return String(text || '').trim() === '<KODY_SILENT_SKIP>';
 }
 
 async function _streamToHolder(modelIdx, sessionId, msg, holderEl, abortCtrl) {

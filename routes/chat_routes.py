@@ -469,6 +469,80 @@ def setup_chat_routes(
         form_data = await request.form()
         message = form_data.get("message")
         session = form_data.get("session")
+
+        # Self-replay guard:
+        # Sometimes a frontend/stream bug can accidentally submit the previous
+        # assistant reply as the next user message. If we let that through, the
+        # model starts answering itself forever, because apparently even software
+        # can develop a mirror problem.
+        def _self_replay_norm(_value):
+            import re
+            _txt = str(_value or "")
+            _txt = _txt.replace("\u2019", "'").replace("\u2018", "'")
+            _txt = _txt.replace("\u201c", '"').replace("\u201d", '"')
+            _txt = re.sub(r"\s+", " ", _txt.strip().lower())
+            return _txt[:12000]
+
+        def _self_replay_role(_msg):
+            if isinstance(_msg, dict):
+                return _msg.get("role", "")
+            return getattr(_msg, "role", "")
+
+        def _self_replay_content(_msg):
+            if isinstance(_msg, dict):
+                return _msg.get("content", "")
+            return getattr(_msg, "content", "")
+
+        def _recent_assistant_messages(_session_id, _limit=3):
+            _found = []
+            try:
+                _getter = getattr(session_manager, "get_session", None)
+                _sess = _getter(_session_id) if callable(_getter) and _session_id else None
+                for _msg in reversed(getattr(_sess, "messages", []) or []):
+                    if _self_replay_role(_msg) == "assistant":
+                        _content = _self_replay_content(_msg)
+                        if _content:
+                            _found.append(str(_content))
+                            if len(_found) >= _limit:
+                                break
+            except Exception as _e:
+                logger.debug("self-replay guard could not inspect history: %s", _e)
+            return _found
+
+        _incoming_replay_text = str(message or "").strip()
+        if _incoming_replay_text and session:
+            from difflib import SequenceMatcher
+
+            _incoming_norm = _self_replay_norm(_incoming_replay_text)
+
+            for _assistant_text in _recent_assistant_messages(str(session)):
+                _assistant_norm = _self_replay_norm(_assistant_text)
+
+                if not _incoming_norm or not _assistant_norm:
+                    continue
+
+                _exact_match = _incoming_norm == _assistant_norm
+                _near_match = (
+                    min(len(_incoming_norm), len(_assistant_norm)) >= 500
+                    and SequenceMatcher(None, _incoming_norm, _assistant_norm).ratio() >= 0.985
+                )
+
+                if _exact_match or _near_match:
+                    logger.warning(
+                        "Blocked assistant self-replay loop: session=%s incoming_len=%s assistant_len=%s",
+                        session,
+                        len(_incoming_replay_text),
+                        len(_assistant_text),
+                    )
+
+                    async def _self_replay_blocked_stream():
+                        yield f'data: {json.dumps({"type": "blocked", "reason": "assistant_self_replay"})}\n\n'
+                        yield "data: [DONE]\n\n"
+
+                    return StreamingResponse(
+                        _self_replay_blocked_stream(),
+                        media_type="text/event-stream",
+                    )
         attachments = form_data.get("attachments")
         use_web = form_data.get("use_web")
         use_research = form_data.get("use_research")

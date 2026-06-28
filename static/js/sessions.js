@@ -120,6 +120,24 @@ export function initDependencies() {}
 // ── Folder state persistence ──
 const FOLDER_STATE_KEY = 'odysseus-folder-state';
 const FOLDER_ORDER_KEY = 'odysseus-folder-order';
+const GROUP_PARTICIPANT_SESSION_KEY = 'odysseus-group-participant-sessions';
+
+function _isGroupParticipantSession(id, session = null) {
+  try {
+    const raw = localStorage.getItem(GROUP_PARTICIPANT_SESSION_KEY);
+    const ids = JSON.parse(raw || '[]');
+    if (Array.isArray(ids) && ids.includes(String(id))) return true;
+  } catch (e) {}
+
+  // Backward-compatible cleanup for already-created internal group sessions.
+  // Parent group sessions contain multiple participants joined by commas:
+  //   [GRP] Ida, Kody
+  // Participant plumbing sessions are single-model:
+  //   [GRP] 3090-QwenCoder-30B:Q4
+  const name = String((session && session.name) || '').trim();
+  return name.startsWith('[GRP] ') && !name.includes(',');
+}
+
 
 function loadFolderState() {
   return Storage.getJSON(FOLDER_STATE_KEY, {});
@@ -756,7 +774,7 @@ function _renderSessionListImpl() {
 
   // Get saved order from localStorage
   const savedOrder = Storage.get('session-order');
-  let orderedSessions = sessions.filter(s => !s.archived && s.folder !== 'Assistant' && !_isIncognitoSession(s.id) && (s.name || '').trim() !== 'Nobody' && (s.name || '').trim() !== 'Incognito');
+  let orderedSessions = sessions.filter(s => !s.archived && s.folder !== 'Assistant' && !_isIncognitoSession(s.id) && !_isGroupParticipantSession(s.id, s) && (s.name || '').trim() !== 'Nobody' && (s.name || '').trim() !== 'Incognito');
 
   if (savedOrder) {
     try {
@@ -1366,7 +1384,7 @@ export async function loadSessions() {
       sessionsSection.classList.remove('hidden');
     }
 
-    const activeSessions = sessions.filter(s => !s.archived);
+    const activeSessions = sessions.filter(s => !s.archived && !_isGroupParticipantSession(s.id, s));
     // "Transient" sessions = the singleton Assistant chat + any task-output
     // session. Treat them as not-restorable so coming back to the app lands
     // on the user's last actual conversation, not whichever check-in task
