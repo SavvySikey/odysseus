@@ -708,7 +708,7 @@ export async function sendMessage(msg) {
     if (_mode === 'parallel') {
       await _sendParallel(msg, box);
     } else {
-      await _sendRoundRobin(msg, box);
+      await _sendSequential(msg, box);
     }
   } finally {
     _sendInProgress = false;
@@ -755,7 +755,7 @@ async function _sendParallel(msg, box) {
   await _syncAllResponses(holders);
 }
 
-  async function _sendRoundRobin(msg, box) {
+  async function _sendSequential(msg, box) {
     // Sequential mode must preserve participant order.
     // Required for Ida → Kody routing workflows.
     const order = _models.map((_, i) => i);
