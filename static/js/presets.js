@@ -624,6 +624,8 @@ export function openCustomPresetModal() {
     // represents — a character chat, a group, or a plain tuned chat. Label
     // it so the action is obvious instead of a generic "Start".
     const activeTab = document.querySelector('.preset-tab.active')?.dataset.chartab || 'inject';
+      const saveOnlyBtn = document.getElementById('save-persona-only');
+      if (saveOnlyBtn) saveOnlyBtn.style.display = activeTab === 'character' ? '' : 'none';
     let label;
     if (activeTab === 'group') {
       label = 'Start Group';
@@ -865,6 +867,75 @@ export async function saveCustomPreset(showToast, showError) {
 /**
  * Get selected preset ID
  */
+
+
+
+/**
+ * Save persona template only.
+ * Does not activate the persona and does not start a chat.
+ */
+export async function savePersonaOnly(showToast, showError) {
+  const activeTab = document.querySelector('.preset-tab.active')?.dataset.chartab || 'character';
+  if (activeTab !== 'character') return;
+
+  const nameInput = document.getElementById('custom-character-name');
+  const tempInput = document.getElementById('custom-temperature');
+  const tokensInput = document.getElementById('custom-max-tokens');
+  const promptInput = document.getElementById('custom-system-prompt');
+
+  if (!nameInput || !tempInput || !tokensInput || !promptInput) return;
+
+  const name = nameInput.value.trim();
+  const system_prompt = promptInput.value || '';
+
+  if (!name) {
+    if (showError) showError('Give the persona a name first');
+    return;
+  }
+
+  const tempRaw = parseFloat(tempInput.value);
+  const temperature = Math.max(0, Math.min(2, Number.isFinite(tempRaw) ? tempRaw : 1.0));
+
+  const tokenRaw = parseInt(tokensInput.value, 10);
+  const max_tokens = Number.isFinite(tokenRaw) ? (tokenRaw > 8192 ? 0 : tokenRaw) : 0;
+
+  const selectedTemplate = document.getElementById('char-template-select')?.value || '';
+  const isBuiltinPreset = PROMPT_TEMPLATES.some(t => t.isPreset && (t.name === name || t.name === selectedTemplate));
+
+  if (isBuiltinPreset) {
+    if (showError) showError('Built-in personas cannot be overwritten. Click + New first.');
+    return;
+  }
+
+  const existing = userTemplates.find(t => t.name === name);
+
+  try {
+    const response = await fetch(`${API_BASE}/api/presets/templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: existing ? existing.id : '',
+        name,
+        system_prompt,
+        temperature,
+        max_tokens,
+      }),
+    });
+
+    if (!response.ok) throw new Error(`Template save failed: ${response.status}`);
+
+    await loadUserTemplates();
+
+    if (showToast) showToast('Persona saved');
+
+    const modal = document.getElementById('custom-preset-modal');
+    if (modal) modal.classList.add('hidden');
+  } catch (error) {
+    console.error('Error saving persona template:', error);
+    if (showError) showError('Failed to save persona');
+  }
+}
+
 export function getSelectedPreset() {
   return selectedPreset;
 }
@@ -1096,6 +1167,7 @@ const presetsModule = {
   setActivePreset,
   openCustomPresetModal,
   saveCustomPreset,
+    savePersonaOnly,
   getSelectedPreset,
   getPreset,
   getAllPresets,

@@ -37673,3 +37673,76 @@ body.theme-frosted .modal {
 .log-line-default {
   color: var(--fg, #9cdef2);
 }
+
+/* Mikey local: Persona modal editing QoL */
+#custom-preset-modal .preset-modal-content {
+  position: relative;
+}
+
+#custom-preset-modal .modal-footer button#save-persona-only {
+  align-items: center;
+  gap: 6px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--fg);
+  border-color: var(--border);
+}
+
+#custom-preset-modal .modal-footer button#save-persona-only:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+@media (min-width: 769px) {
+  #custom-preset-modal .preset-modal-content {
+    width: min(760px, calc(100vw - 48px)) !important;
+    max-width: calc(100vw - 48px) !important;
+    height: min(88vh, 900px) !important;
+    max-height: calc(100vh - 32px) !important;
+    resize: none !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  #custom-preset-modal .preset-modal-body {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  #custom-preset-modal #char-fields-wrap {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  #custom-preset-modal:has(.preset-tab[data-chartab="character"].active)
+  .preset-chartab[data-chartab-panel="character"] {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  #custom-preset-modal .char-prompt-wrap {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    position: relative !important;
+  }
+
+  #custom-system-prompt {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    resize: none !important;
+  }
+
+  #preset-resize-grip {
+    display: none !important;
+  }
+}

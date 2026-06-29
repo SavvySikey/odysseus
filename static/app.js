@@ -457,7 +457,8 @@ function initializeEventListeners() {
   const cancelCustomPreset = el('cancel-custom-preset');
   const saveCustomPreset = el('save-custom-preset');
 
-  if (closeCustomPreset) {
+      const savePersonaOnly = el('save-persona-only');
+if (closeCustomPreset) {
     closeCustomPreset.addEventListener('click', () => {
       el('custom-preset-modal').classList.add('hidden');
     });
@@ -477,6 +478,13 @@ function initializeEventListeners() {
       await presetsModule.saveCustomPreset(uiModule.showToast, uiModule.showError);
     });
   }
+    if (savePersonaOnly) {
+      savePersonaOnly.addEventListener('click', async () => {
+        await presetsModule.savePersonaOnly(uiModule.showToast, uiModule.showError);
+      });
+    }
+
+
 
   // Settings dropdown removed — items are now inline in sidebar section
 
